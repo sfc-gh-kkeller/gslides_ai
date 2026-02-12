@@ -19,9 +19,8 @@ if [ ! -d "$APP_PATH" ]; then
 fi
 
 # Create temp directory for DMG contents
-DMG_DIR="build/dmg_temp"
-rm -rf "$DMG_DIR"
-mkdir -p "$DMG_DIR"
+DMG_DIR="$(mktemp -d)"
+trap "rm -rf '$DMG_DIR'" EXIT
 
 # Copy app to DMG directory
 echo "Copying app to DMG staging area..."
@@ -38,27 +37,28 @@ mkdir -p dist
 # Remove old DMG if exists
 rm -f "$DMG_PATH"
 
-# Create DMG with hdiutil
-# Using UDBZ for better compression
+# Create DMG with hdiutil using a temp file first
+TEMP_DMG="$(mktemp).dmg"
 hdiutil create -volname "$APP_NAME" \
     -srcfolder "$DMG_DIR" \
-    -ov -format UDBZ \
-    "$DMG_PATH"
+    -ov -format UDRW \
+    "$TEMP_DMG"
+
+# Convert to compressed format
+hdiutil convert "$TEMP_DMG" -format UDZO -o "$DMG_PATH"
+rm -f "$TEMP_DMG"
 
 echo ""
 echo "DMG created: $DMG_PATH"
 echo ""
 echo "Size: $(du -h "$DMG_PATH" | cut -f1)"
 
-# Cleanup
-rm -rf "$DMG_DIR"
-
 # Also create a zip for direct download
 echo ""
 echo "Creating zip archive..."
 ZIP_PATH="dist/GSlides-AI-macOS-${ARCH}.zip"
 rm -f "$ZIP_PATH"
-cd "$APP_DIR" && zip -r "../../$ZIP_PATH" "${APP_NAME}.app" -x "*.DS_Store"
+cd "$APP_DIR" && zip -r -q "../../$ZIP_PATH" "${APP_NAME}.app" -x "*.DS_Store"
 cd - > /dev/null
 
 echo "ZIP created: $ZIP_PATH"
