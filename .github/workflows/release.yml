@@ -4,22 +4,15 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 jobs:
-  build-macos:
-    runs-on: macos-latest
-    strategy:
-      matrix:
-        arch: [arm64, x86_64]
+  build-macos-arm64:
+    runs-on: macos-14  # M1 runner
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
       
       - name: Install Pixi
         uses: prefix-dev/setup-pixi@v0.8.1
@@ -29,32 +22,63 @@ jobs:
       - name: Install dependencies
         run: pixi install
       
-      - name: Build macOS app (${{ matrix.arch }})
-        run: |
-          if [ "${{ matrix.arch }}" = "arm64" ]; then
-            pixi run build-macos-arm
-          else
-            pixi run build-macos-intel
-          fi
+      - name: Build macOS app (ARM64)
+        run: pixi run pyinstaller gslides_ai.spec --distpath dist/arm64 --workpath build/arm64 --noconfirm
       
-      - name: Create ZIP archive
+      - name: Create DMG
         run: |
-          cd build/macos
-          if [ "${{ matrix.arch }}" = "arm64" ]; then
-            zip -r "../../GSlides-AI-macOS-arm64.zip" "GSlides AI.app"
-          else
-            zip -r "../../GSlides-AI-macOS-intel.zip" "GSlides AI.app"
-          fi
+          ./scripts/create_dmg.sh arm64
       
-      - name: Upload artifact
+      - name: Upload ARM64 DMG
         uses: actions/upload-artifact@v4
         with:
-          name: GSlides-AI-macOS-${{ matrix.arch }}
-          path: GSlides-AI-macOS-${{ matrix.arch }}.zip
+          name: GSlides-AI-macOS-arm64-dmg
+          path: dist/GSlides-AI-Installer-*.dmg
+      
+      - name: Upload ARM64 ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: GSlides-AI-macOS-arm64-zip
+          path: dist/GSlides-AI-macOS-arm64.zip
+
+  build-macos-intel:
+    runs-on: macos-13  # Intel runner
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Install Pixi
+        uses: prefix-dev/setup-pixi@v0.8.1
+        with:
+          pixi-version: v0.39.0
+      
+      - name: Install dependencies
+        run: pixi install
+      
+      - name: Build macOS app (Intel)
+        run: pixi run pyinstaller gslides_ai.spec --distpath dist/intel --workpath build/intel --noconfirm
+      
+      - name: Create DMG
+        run: |
+          ./scripts/create_dmg.sh intel
+      
+      - name: Upload Intel DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: GSlides-AI-macOS-intel-dmg
+          path: dist/GSlides-AI-Installer-*.dmg
+      
+      - name: Upload Intel ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: GSlides-AI-macOS-intel-zip
+          path: dist/GSlides-AI-macOS-intel.zip
 
   release:
-    needs: build-macos
+    needs: [build-macos-arm64, build-macos-intel]
     runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
     permissions:
       contents: write
     
@@ -67,14 +91,41 @@ jobs:
         with:
           path: artifacts
       
+      - name: List artifacts
+        run: find artifacts -type f
+      
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            artifacts/GSlides-AI-macOS-arm64/GSlides-AI-macOS-arm64.zip
-            artifacts/GSlides-AI-macOS-intel/GSlides-AI-macOS-intel.zip
+            artifacts/GSlides-AI-macOS-arm64-dmg/*.dmg
+            artifacts/GSlides-AI-macOS-arm64-zip/*.zip
+            artifacts/GSlides-AI-macOS-intel-dmg/*.dmg
+            artifacts/GSlides-AI-macOS-intel-zip/*.zip
           generate_release_notes: true
           draft: false
           prerelease: false
+          body: |
+            ## Downloads
+            
+            | File | Description |
+            |------|-------------|
+            | `GSlides-AI-Installer-*-arm64.dmg` | DMG installer for Apple Silicon Macs (M1/M2/M3) |
+            | `GSlides-AI-Installer-*-intel.dmg` | DMG installer for Intel Macs |
+            | `GSlides-AI-macOS-arm64.zip` | ZIP archive for Apple Silicon Macs |
+            | `GSlides-AI-macOS-intel.zip` | ZIP archive for Intel Macs |
+            
+            ## Installation
+            
+            1. Download the appropriate DMG or ZIP for your Mac
+            2. For DMG: Open and drag "GSlides AI" to Applications
+            3. For ZIP: Extract and move "GSlides AI.app" to Applications
+            4. On first launch, right-click and select "Open" to bypass Gatekeeper
+            
+            ## Requirements
+            
+            - macOS 10.15 (Catalina) or later
+            - [Cortex Code CLI](https://docs.snowflake.com/en/user-guide/snowflake-cortex/cortex-code) installed
+            - Google Cloud project with Slides API enabled
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
