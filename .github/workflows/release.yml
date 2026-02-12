@@ -1,0 +1,80 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        arch: [arm64, x86_64]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install Pixi
+        uses: prefix-dev/setup-pixi@v0.8.1
+        with:
+          pixi-version: v0.39.0
+      
+      - name: Install dependencies
+        run: pixi install
+      
+      - name: Build macOS app (${{ matrix.arch }})
+        run: |
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            pixi run build-macos-arm
+          else
+            pixi run build-macos-intel
+          fi
+      
+      - name: Create ZIP archive
+        run: |
+          cd build/macos
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            zip -r "../../GSlides-AI-macOS-arm64.zip" "GSlides AI.app"
+          else
+            zip -r "../../GSlides-AI-macOS-intel.zip" "GSlides AI.app"
+          fi
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GSlides-AI-macOS-${{ matrix.arch }}
+          path: GSlides-AI-macOS-${{ matrix.arch }}.zip
+
+  release:
+    needs: build-macos
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/GSlides-AI-macOS-arm64/GSlides-AI-macOS-arm64.zip
+            artifacts/GSlides-AI-macOS-intel/GSlides-AI-macOS-intel.zip
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

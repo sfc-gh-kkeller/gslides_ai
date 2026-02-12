@@ -5,13 +5,19 @@ import sqlite3
 import json
 import os
 import subprocess
+import sys
 import threading
 import queue
 import webbrowser
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 import uuid
+
+# App version - update this for each release
+APP_VERSION = "1.0.0"
+GITHUB_REPO = "sfc-gh-kkeller/gslides_ai"
 
 # Snowflake brand colors
 SNOWFLAKE_BLUE = "#29B5E7"
@@ -362,6 +368,137 @@ class GSlidesChatApp:
         except:
             return False
     
+    def _check_for_updates(self):
+        """Check GitHub for available updates (runs in background)."""
+        def check():
+            try:
+                url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+                req = urllib.request.Request(url, headers={"Accept": "application/vnd.github.v3+json"})
+                with urllib.request.urlopen(req, timeout=10) as response:
+                    data = json.loads(response.read().decode())
+                    latest_version = data.get("tag_name", "").lstrip("v")
+                    
+                    if latest_version and self._is_newer_version(latest_version, APP_VERSION):
+                        # Find download URL for current architecture
+                        download_url = None
+                        import platform
+                        arch = platform.machine()
+                        
+                        for asset in data.get("assets", []):
+                            name = asset.get("name", "").lower()
+                            if arch == "arm64" and "arm" in name:
+                                download_url = asset.get("browser_download_url")
+                                break
+                            elif arch == "x86_64" and "intel" in name:
+                                download_url = asset.get("browser_download_url")
+                                break
+                        
+                        # Fallback to first zip if no arch-specific found
+                        if not download_url:
+                            for asset in data.get("assets", []):
+                                if asset.get("name", "").endswith(".zip"):
+                                    download_url = asset.get("browser_download_url")
+                                    break
+                        
+                        if download_url:
+                            self.page.run_thread(
+                                lambda: self._show_update_dialog(latest_version, download_url, data.get("body", ""))
+                            )
+            except Exception as e:
+                print(f"Update check failed: {e}")
+        
+        threading.Thread(target=check, daemon=True).start()
+    
+    def _is_newer_version(self, latest: str, current: str) -> bool:
+        """Compare version strings (e.g., '1.2.0' > '1.1.0')."""
+        try:
+            latest_parts = [int(x) for x in latest.split(".")]
+            current_parts = [int(x) for x in current.split(".")]
+            return latest_parts > current_parts
+        except:
+            return False
+    
+    def _show_update_dialog(self, version: str, download_url: str, changelog: str):
+        """Show dialog when update is available."""
+        def do_update(e):
+            dialog.open = False
+            self.page.update()
+            self._launch_updater(download_url)
+        
+        def dismiss(e):
+            dialog.open = False
+            self.page.update()
+        
+        dialog = ft.AlertDialog(
+            title=ft.Row([
+                ft.Icon(ft.Icons.SYSTEM_UPDATE, color=SNOWFLAKE_BLUE, size=28),
+                ft.Text("Update Available", size=18, weight=ft.FontWeight.BOLD),
+            ], spacing=10),
+            content=ft.Column([
+                ft.Text(f"Version {version} is available!", size=14),
+                ft.Text(f"You have version {APP_VERSION}", size=12, color="#666666"),
+                ft.Container(height=10),
+                ft.Text("What's New:", size=12, weight=ft.FontWeight.W_500),
+                ft.Container(
+                    content=ft.Markdown(
+                        changelog[:500] + ("..." if len(changelog) > 500 else ""),
+                        selectable=True,
+                        extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
+                    ),
+                    height=150,
+                    border=ft.border.all(1, "#E0E0E0"),
+                    border_radius=8,
+                    padding=10,
+                ),
+            ], tight=True, spacing=5, width=400),
+            actions=[
+                ft.TextButton("Later", on_click=dismiss),
+                ft.ElevatedButton(
+                    "Update Now",
+                    icon=ft.Icons.DOWNLOAD,
+                    bgcolor=SNOWFLAKE_BLUE,
+                    color="#FFFFFF",
+                    on_click=do_update,
+                ),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+        
+        self.page.overlay.append(dialog)
+        dialog.open = True
+        self.page.update()
+    
+    def _launch_updater(self, download_url: str):
+        """Launch the updater and quit the app."""
+        # Get path to updater script
+        updater_path = Path(__file__).parent / "updater.py"
+        
+        # Get path to current app bundle (if running as .app)
+        # When running as .app, sys.executable points to the Python inside the bundle
+        app_path = None
+        if ".app" in sys.executable:
+            # Extract .app path from executable path
+            parts = sys.executable.split(".app")
+            app_path = parts[0] + ".app"
+        else:
+            # Running in development mode - use a placeholder
+            app_path = str(Path.home() / "Applications" / "GSlides AI.app")
+        
+        # Launch updater
+        pid = os.getpid()
+        subprocess.Popen([
+            sys.executable,
+            str(updater_path),
+            download_url,
+            app_path,
+            "--main-pid", str(pid),
+        ])
+        
+        # Give updater time to start, then quit
+        import time
+        time.sleep(0.5)
+        self.page.window.close()
+    
     def _build_ui(self):
         """Build the main UI with sidebar."""
         # Sidebar
@@ -381,6 +518,9 @@ class GSlidesChatApp:
         
         # Show chats view by default
         self._show_chats_view()
+        
+        # Check for updates in background
+        self._check_for_updates()
     
     def _build_sidebar(self) -> ft.Container:
         """Build the sidebar navigation."""
@@ -822,7 +962,7 @@ class GSlidesChatApp:
                 ft.Text("GSlides AI", size=20, weight=ft.FontWeight.BOLD),
             ], spacing=10),
             content=ft.Column([
-                ft.Text("Version 1.0.0", size=14, color="#666666"),
+                ft.Text(f"Version {APP_VERSION}", size=14, color="#666666"),
                 ft.Container(height=15),
                 
                 ft.Text("Created by", size=12, color="#999999"),
