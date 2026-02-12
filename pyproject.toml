@@ -1,0 +1,54 @@
+[project]
+authors = [{name = "sfc-gh-kkeller", email = "kevin.keller@snowflake.com"}]
+dependencies = [
+    "google-api-python-client>=2.0.0",
+    "google-auth-oauthlib>=1.0.0",
+    "google-auth-httplib2>=0.2.0",
+    "click>=8.0.0",
+    "rich>=13.0.0",
+    "flet>=0.25.0",
+]
+name = "gslides_ai"
+requires-python = ">= 3.11"
+version = "0.1.0"
+description = "Desktop app for generating Google Slides with AI"
+
+[project.scripts]
+gslides = "gslides_ai.cli:cli"
+
+[build-system]
+build-backend = "hatchling.build"
+requires = ["hatchling"]
+
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["osx-arm64"]
+
+[tool.pixi.dependencies]
+google-cloud-sdk = "*"
+pillow = ">=12.1.1,<13"
+pyinstaller = ">=6.18.0,<7"
+
+[tool.pixi.pypi-dependencies]
+gslides_ai = { path = ".", editable = true }
+
+[tool.pixi.tasks]
+auth = "gslides auth"
+app = "flet run main.py"
+build-macos = "flet build macos --project main.py --name 'GSlides AI' --org com.snowflake.gslidesai --product 'GSlides AI' --icon assets/icon.png"
+build-macos-arm = "flet build macos --project main.py --name 'GSlides AI' --arch arm64 --icon assets/icon.png"
+build-macos-intel = "flet build macos --project main.py --name 'GSlides AI' --arch x86_64 --icon assets/icon.png"
+
+[tool.flet]
+# Flet build configuration
+project = "main.py"
+product = "GSlides AI"
+org = "com.snowflake.gslidesai"
+company = "Snowflake"
+copyright = "Copyright 2026 Snowflake Inc."
+description = "Create stunning Google Slides presentations"
+
+[tool.flet.macos]
+# Build universal binary for both Intel and Apple Silicon
+build_arch = ["arm64", "x86_64"]
+entitlements = { "com.apple.security.network.client" = true }
