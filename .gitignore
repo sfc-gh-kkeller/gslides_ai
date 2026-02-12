@@ -13,9 +13,6 @@ dist/
 *.egg-info/
 .eggs/
 
-# PyInstaller
-*.spec
-
 # macOS
 .DS_Store
 *.app
